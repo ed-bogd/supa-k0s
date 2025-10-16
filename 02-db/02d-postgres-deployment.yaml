@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: supabase/postgres:17.6.1.016 #15.8.1.060
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_HOST
+          value: "/var/run/postgresql"
+        - name: PGPORT
+          value: "5432"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "postgres"
+        # - name: POSTGRES_USER
+        #   value: "supabase_admin"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: JWT_EXP
+          value: "3600"
+        volumeMounts:
+        # - name: db-pre-init
+        #   mountPath: /docker-entrypoint-initdb.d/00-init-roles.sh
+        #   subPath: 00-init-roles.sh
+        # - name: db-migrations
+        #   mountPath: /docker-entrypoint-initdb.d/migrations
+        # - name: db-init-scripts
+        #   mountPath: /docker-entrypoint-initdb.d/init-scripts
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+            - -h
+            - localhost
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+      volumes:
+      # - name: db-pre-init
+      #   configMap:
+      #     name: db-pre-init
+      #     defaultMode: 0755
+      # - name: db-migrations
+      #   configMap:
+      #     name: db-migrations
+      # - name: db-init-scripts
+      #   configMap:
+      #     name: db-init-scripts

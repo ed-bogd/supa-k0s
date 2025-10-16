@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supabase-config
+  namespace: supabase
+data:
+  imgproxy-enable-webp-detection: "true"

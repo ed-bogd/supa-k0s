@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-endpoints
+  namespace: supabase
+data:
+  update-endpoints.sql: |
+    -- Update the logs.all endpoint query to work with self-hosted Analytics + Postgres backend
+    -- Based on: https://github.com/supabase/supabase/issues/37218
+    
+    UPDATE _analytics.endpoint_queries
+    SET query = $$
+    WITH retention AS (
+      SELECT TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY) AS date
+    ),
+
+    edge_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `cloudflare.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    postgres_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `postgres.logs` AS t
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    function_edge_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `deno-relay-logs` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    function_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `deno-subhosting-events` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    auth_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `gotrue.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    realtime_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `realtime.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    storage_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `storage.logs.prod.2` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    postgrest_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `postgREST.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    pgbouncer_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `pgbouncer.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    )
+
+    SELECT id, timestamp, event_message, metadata
+    FROM edge_logs
+    LIMIT 100;
+    $$,
+    source_mapping = '{"edge_logs": "c7bd8f4a-47ff-4b51-b659-9ee5e5608d0e", "postgres_logs": "8efb7913-7bde-4c27-b09a-8d217741fda3", "auth_logs": "6ae3aee3-96bc-42b1-8a2d-84c608ef4f58", "realtime_logs": "35468bc6-24ac-4c7a-9033-9a32a050fa83", "storage_logs": "7e8e2f9f-e0d9-4592-9836-3324d1bfc930", "postgrest_logs": "e889921c-4bae-473e-a3e7-fba31afe415e", "function_logs": "0cd6305b-c3d6-475b-8964-032ce9a873b6"}'
+    WHERE name = 'logs.all';

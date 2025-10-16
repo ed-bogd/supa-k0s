@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-init-sql
+  namespace: supabase
+data:
+  script.sh: |
+    #!/bin/bash
+    psql -h db -U supabase_admin -d postgres <<EOF
+    ALTER USER supabase_auth_admin PASSWORD '$POSTGRES_PASSWORD';
+
+    ALTER TYPE public.factor_type SET SCHEMA auth;
+    ALTER TYPE public.factor_status SET SCHEMA auth;
+    ALTER TYPE public.aal_level SET SCHEMA auth;
+    ALTER TYPE public.code_challenge_method SET SCHEMA auth;
+
+    -- Transfer ownership of existing types if they exist
+    ALTER TYPE auth.factor_type OWNER TO supabase_auth_admin;
+    ALTER TYPE auth.factor_status OWNER TO supabase_auth_admin;
+    ALTER TYPE auth.aal_level OWNER TO supabase_auth_admin;
+
+    ALTER SCHEMA auth OWNER TO supabase_auth_admin;
+
+    -- Generate and execute ALTER TABLE commands for all tables in the schema
+    DO \$\$
+    DECLARE
+        table_name TEXT;
+    BEGIN
+        FOR table_name IN
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'auth'
+        LOOP
+            EXECUTE 'ALTER TABLE auth.' || table_name || ' OWNER TO supabase_auth_admin;';
+        END LOOP;
+    END \$\$;
+
+    SELECT schemaname, tablename, tableowner
+    FROM pg_tables
+    WHERE schemaname = 'auth';
+    EOF

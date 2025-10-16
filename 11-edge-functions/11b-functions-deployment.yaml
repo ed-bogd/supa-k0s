@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: functions
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: functions
+  template:
+    metadata:
+      labels:
+        app: functions
+    spec:
+      containers:
+      - name: functions
+        image: supabase/edge-runtime:v1.69.12 #v1.69.6
+        ports:
+        - containerPort: 9000
+          name: http
+        env:
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: SUPABASE_URL
+          value: "http://kong:8000"
+        - name: SUPABASE_ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: ANON_KEY
+        - name: SUPABASE_SERVICE_ROLE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: SERVICE_ROLE_KEY
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: SUPABASE_DB_URL
+          value: "postgres://postgres:your-super-secret-password@db:5432/postgres"
+        - name: VERIFY_JWT
+          value: "false"
+        - name: LOG_LEVEL  # Add this to enable logging (values: debug, info, warn, error)
+          value: "info"
+        args:
+        - "start"
+        # - --verbose
+        - --log-source
+        - "--main-service"
+        - "/home/deno/functions/main"
+        volumeMounts:
+        - name: functions-code
+          mountPath: /home/deno/functions/main/index.ts
+          subPath: index.ts
+      volumes:
+      - name: functions-code
+        configMap:
+          name: functions-code

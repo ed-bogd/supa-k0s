@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-schema-config
+  namespace: supabase
+data:
+  create_schema.sql: |
+    CREATE SCHEMA IF NOT EXISTS _analytics;

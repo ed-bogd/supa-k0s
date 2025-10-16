@@ -1,0 +1,352 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-setup
+  namespace: supabase
+data:
+  # Step 1: Create views
+  create-views.sql: |
+    -- Create views compatible with Supabase Studio's local dev queries
+    -- Studio expects to unnest metadata and then access request/response as nested arrays
+
+    -- Drop existing views
+    DROP VIEW IF EXISTS _analytics.postgres_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.edge_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.auth_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.realtime_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.storage_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.postgrest_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.function_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.function_edge_logs CASCADE;
+
+    -- Get the source tokens
+    DO $$
+    DECLARE
+      postgres_token uuid;
+      edge_token uuid;
+      auth_token uuid;
+      realtime_token uuid;
+      storage_token uuid;
+      postgrest_token uuid;
+      functions_token uuid;
+    BEGIN
+      -- Get tokens for each source
+      SELECT token INTO postgres_token FROM _analytics.sources WHERE name = 'postgres.logs';
+      SELECT token INTO edge_token FROM _analytics.sources WHERE name = 'cloudflare.logs.prod';
+      SELECT token INTO auth_token FROM _analytics.sources WHERE name = 'gotrue.logs.prod';
+      SELECT token INTO realtime_token FROM _analytics.sources WHERE name = 'realtime.logs.prod';
+      SELECT token INTO storage_token FROM _analytics.sources WHERE name = 'storage.logs.prod.2';
+      SELECT token INTO postgrest_token FROM _analytics.sources WHERE name = 'postgREST.logs.prod';
+      SELECT token INTO functions_token FROM _analytics.sources WHERE name = 'deno-relay-logs';
+      
+      -- Create simplified views - Studio will handle the unnesting in BigQuery style
+      -- For postgres, we just need the basic structure
+      IF postgres_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.postgres_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(postgres_token::text, '-', '_'));
+      END IF;
+      
+      IF edge_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.edge_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(edge_token::text, '-', '_'));
+      END IF;
+      
+      IF auth_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.auth_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(auth_token::text, '-', '_'));
+      END IF;
+      
+      IF realtime_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.realtime_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(realtime_token::text, '-', '_'));
+      END IF;
+      
+      IF storage_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.storage_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(storage_token::text, '-', '_'));
+      END IF;
+      
+      IF postgrest_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.postgrest_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(postgrest_token::text, '-', '_'));
+      END IF;
+      
+      IF functions_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.function_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(functions_token::text, '-', '_'));
+        EXECUTE format('CREATE VIEW _analytics.function_edge_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(functions_token::text, '-', '_'));
+      END IF;
+    END $$;
+
+    -- Grant permissions on the schema and views
+    GRANT USAGE ON SCHEMA _analytics TO postgres, authenticator, supabase_admin;
+    GRANT SELECT ON ALL TABLES IN SCHEMA _analytics TO postgres, authenticator, supabase_admin;
+
+    -- Set default privileges for future tables/views in _analytics schema
+    ALTER DEFAULT PRIVILEGES IN SCHEMA _analytics GRANT SELECT ON TABLES TO postgres, authenticator, supabase_admin;
+
+  # Step 2: Update source_mapping with actual UUIDs
+  update-source-mapping.sql: |
+    -- Update the source_mapping in endpoint_queries with actual source UUIDs
+    -- This must run AFTER sources have been created by Vector
+    
+    UPDATE _analytics.endpoint_queries
+    SET source_mapping = jsonb_build_object(
+      'edge_logs', (SELECT token FROM _analytics.sources WHERE name = 'cloudflare.logs.prod'),
+      'postgres_logs', (SELECT token FROM _analytics.sources WHERE name = 'postgres.logs'),
+      'auth_logs', (SELECT token FROM _analytics.sources WHERE name = 'gotrue.logs.prod'),
+      'realtime_logs', (SELECT token FROM _analytics.sources WHERE name = 'realtime.logs.prod'),
+      'storage_logs', (SELECT token FROM _analytics.sources WHERE name = 'storage.logs.prod.2'),
+      'postgrest_logs', (SELECT token FROM _analytics.sources WHERE name = 'postgREST.logs.prod'),
+      'function_logs', (SELECT token FROM _analytics.sources WHERE name = 'deno-subhosting-events'),
+      'function_edge_logs', (SELECT token FROM _analytics.sources WHERE name = 'deno-relay-logs'),
+      'pgbouncer_logs', (SELECT token FROM _analytics.sources WHERE name = 'pgbouncer.logs.prod')
+    )
+    WHERE name = 'logs.all';
+    
+    -- Verify the update
+    SELECT 'Source mapping updated for logs.all endpoint' AS status;
+
+  # Step 3: Update endpoints (optional - only if BigQuery query needs modification)
+  update-endpoints.sql: |
+    -- Update the logs.all endpoint query to work with self-hosted Analytics + Postgres backend
+    -- Based on: https://github.com/supabase/supabase/issues/37218
+    
+    UPDATE _analytics.endpoint_queries
+    SET query = $$
+    WITH retention AS (
+      SELECT TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY) AS date
+    ),
+
+    edge_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `cloudflare.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    postgres_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `postgres.logs` AS t
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    function_edge_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `deno-relay-logs` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    function_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `deno-subhosting-events` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    auth_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `gotrue.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    realtime_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `realtime.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    storage_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `storage.logs.prod.2` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    postgrest_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `postgREST.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    ),
+
+    pgbouncer_logs AS (
+      SELECT t.timestamp, t.id, t.event_message, t.metadata
+      FROM retention, `pgbouncer.logs.prod` AS t
+      LEFT JOIN UNNEST(t.metadata) AS m
+      WHERE CAST(t.timestamp AS TIMESTAMP) > retention.date
+      ORDER BY CAST(t.timestamp AS TIMESTAMP) DESC
+    )
+
+    SELECT id, timestamp, event_message, metadata
+    FROM edge_logs
+    LIMIT 100;
+    $$
+    WHERE name = 'logs.all';
+
+
+
+# with retention as (
+#       SELECT CURRENT_TIMESTAMP - INTERVAL '365 days' AS date
+#     ),
+
+#     edge_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `cloudflare.logs.prod` as t
+#       cross join unnest(metadata) as m
+#     where
+#       -- order of the where clauses matters
+#       -- project then timestamp then everything else
+#       t.project = @project
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by
+#       cast(t.timestamp as timestamp) desc
+#     ),
+
+#     postgres_logs as (
+#       select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata
+#     from retention, `postgres.logs` as t
+#     where
+#       -- order of the where clauses matters
+#       -- project then timestamp then everything else
+#       t.project = @project
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#       order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     function_edge_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `deno-relay-logs` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       and m.project_ref = @project
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     function_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `deno-subhosting-events` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       -- order of the where clauses matters
+#       -- project then timestamp then everything else
+#       m.project_ref = @project
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     auth_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `gotrue.logs.prod` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       -- order of the where clauses matters
+#       -- project then timestamp then everything else
+#       -- m.project = @project
+#       t.project = @project
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     realtime_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `realtime.logs.prod` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       m.project = @project 
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     storage_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `storage.logs.prod.2` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       m.project = @project
+#       AND CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     postgrest_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `postgREST.logs.prod` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND t.project = @project
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     ),
+
+#     pgbouncer_logs as (
+#     select 
+#       t.timestamp,
+#       t.id, 
+#       t.event_message, 
+#       t.metadata 
+#     from retention, `pgbouncer.logs.prod` as t
+#       cross join unnest(t.metadata) as m
+#     where
+#       CASE WHEN COALESCE(@iso_timestamp_start, '') = '' THEN  TRUE ELSE  cast(t.timestamp as timestamp) > cast(@iso_timestamp_start as timestamp) END
+#       AND CASE WHEN COALESCE(@iso_timestamp_end, '') = '' THEN TRUE ELSE cast(t.timestamp as timestamp) <= cast(@iso_timestamp_end as timestamp) END
+#       AND t.project = @project
+#       AND cast(t.timestamp as timestamp) > retention.date
+#     order by cast(t.timestamp as timestamp) desc
+#     )
+
+#     SELECT id, timestamp, event_message, metadata
+#     FROM edge_logs
+#     LIMIT 100;

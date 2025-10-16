@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      volumes:
+      - name: auth-init-sql
+        configMap:
+          name: auth-init-sql
+      initContainers:
+      - name: wait-for-db
+        image: busybox:1.28
+        command: ['sh', '-c', 'until nc -z db 5432; do echo waiting for db; sleep 2; done;']
+      - name: init-auth-schema
+        image: postgres:15-alpine
+        command: ['sh', '/script.sh']
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: auth-init-sql
+          mountPath: /script.sh
+          subPath: script.sh
+      containers:
+      - name: auth
+        image: supabase/gotrue:v2.180.0 #2.177.0
+        ports:
+        - containerPort: 9999
+          name: http
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: GOTRUE_API_HOST
+          value: "0.0.0.0"
+        - name: GOTRUE_API_PORT
+          value: "9999"
+        - name: API_EXTERNAL_URL
+          value: "http://localhost:8000"
+        - name: GOTRUE_DB_DRIVER
+          value: "postgres"
+        - name: GOTRUE_DB_DATABASE_URL
+          value: "postgres://supabase_auth_admin:your-super-secret-password@db:5432/postgres" #"postgres://supabase_auth_admin:your-super-secret-password@db:5432/postgres?search_path=auth"
+        - name: GOTRUE_SITE_URL
+          value: "http://localhost:8000"
+        - name: GOTRUE_URI_ALLOW_LIST
+          value: ""
+        - name: GOTRUE_DISABLE_SIGNUP
+          value: "false"
+        - name: GOTRUE_JWT_ADMIN_ROLES
+          value: "service_role"
+        - name: GOTRUE_JWT_AUD
+          value: "authenticated"
+        - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+          value: "authenticated"
+        - name: GOTRUE_JWT_EXP
+          value: "3600"
+        - name: GOTRUE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+          value: "true"
+        - name: GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED
+          value: "true"
+        - name: GOTRUE_MAILER_AUTOCONFIRM
+          value: "true"
+        - name: GOTRUE_SMTP_ADMIN_EMAIL
+          value: "admin@example.com"
+        - name: GOTRUE_SMTP_HOST
+          value: "smtp.example.com"
+        - name: GOTRUE_SMTP_PORT
+          value: "587"
+        - name: GOTRUE_SMTP_USER
+          value: ""
+        - name: GOTRUE_SMTP_PASS
+          value: ""
+        - name: GOTRUE_SMTP_SENDER_NAME
+          value: "Supabase"
+        - name: GOTRUE_MAILER_URLPATHS_INVITE
+          value: "/auth/v1/verify"
+        - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
+          value: "/auth/v1/verify"
+        - name: GOTRUE_MAILER_URLPATHS_RECOVERY
+          value: "/auth/v1/verify"
+        - name: GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE
+          value: "/auth/v1/verify"
+        - name: GOTRUE_EXTERNAL_PHONE_ENABLED
+          value: "false"
+        - name: GOTRUE_SMS_AUTOCONFIRM
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9999
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9999
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+
+# ALTER USER supabase_auth_admin PASSWORD 'POSTGRES_PASSWORD';
+
+# ALTER TYPE public.factor_type SET SCHEMA auth;  
+# ALTER TYPE public.factor_status SET SCHEMA auth;  
+# ALTER TYPE public.aal_level SET SCHEMA auth;
+# ALTER TYPE public.code_challenge_method SET SCHEMA auth;
+
+# -- Transfer ownership of existing types if they exist  
+# ALTER TYPE auth.factor_type OWNER TO supabase_auth_admin;  
+# ALTER TYPE auth.factor_status OWNER TO supabase_auth_admin;  
+# ALTER TYPE auth.aal_level OWNER TO supabase_auth_admin;
+
+
+# ALTER SCHEMA auth OWNER TO supabase_auth_admin;
+
+# -- Generate and execute ALTER TABLE commands for all tables in the schema
+# DO $$
+# DECLARE
+#     table_name TEXT;
+# BEGIN
+#     FOR table_name IN
+#         SELECT tablename
+#         FROM pg_tables
+#         WHERE schemaname = 'auth'
+#     LOOP
+#         EXECUTE 'ALTER TABLE auth.' || table_name || ' OWNER TO supabase_auth_admin;';
+#     END LOOP;
+# END $$;
+
+# SELECT schemaname, tablename, tableowner   
+# FROM pg_tables   
+# WHERE schemaname = 'auth';

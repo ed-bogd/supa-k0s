@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics
+  template:
+    metadata:
+      labels:
+        app: analytics
+    spec:
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15-alpine
+        command:
+          - sh
+          - -c
+          - |
+            until pg_isready -h db -p 5432 -U postgres; do
+              echo "Waiting for database to be ready..."
+              sleep 2
+            done
+            echo "Database is ready!"
+      - name: create-schema
+        image: postgres:15-alpine
+        command: ["psql", "-h", "db", "-U", "postgres", "-d", "postgres", "-f", "/scripts/create_schema.sql"]
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: schema-script
+          mountPath: /scripts
+      - name: run-migrations  # Moved here from volumes
+        image: supabase/logflare:dev-70b49de #1.17.1
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_NODE_HOST
+          value: "127.0.0.1"
+        - name: DB_USERNAME
+          value: "supabase_admin"
+        - name: DB_DATABASE
+          value: "postgres"
+        - name: DB_HOSTNAME
+          value: "db"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_SCHEMA
+          value: "_analytics"
+        - name: LOGFLARE_SINGLE_TENANT
+          value: "true"
+        - name: LOGFLARE_SUPABASE_MODE
+          value: "true"
+        - name: POSTGRES_BACKEND_SCHEMA
+          value: "_analytics"
+        command:
+          - sh
+          - -c
+          - |
+            echo "Starting migrations at $(date)"
+            export POSTGRES_BACKEND_URL="postgresql://supabase_admin:${DB_PASSWORD}@db:5432/postgres"
+            /opt/app/rel/logflare/bin/logflare eval "Logflare.Release.migrate"
+            echo "Migrations completed at $(date)"
+      volumes:  # Removed run-migrations from here
+      - name: schema-script
+        configMap:
+          name: analytics-schema-config
+      containers:
+      - name: analytics
+        image: supabase/logflare:1.17.1
+        ports:
+        - containerPort: 4000
+        command:
+          - sh
+          - -c
+          - |
+            export POSTGRES_BACKEND_URL="postgresql://supabase_admin:${DB_PASSWORD}@db:5432/postgres"
+            exec /opt/app/rel/logflare/bin/logflare start
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_PUBLIC_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: LOGFLARE_PUBLIC_ACCESS_TOKEN
+        - name: LOGFLARE_PRIVATE_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: LOGFLARE_NODE_HOST
+          value: "127.0.0.1"
+        - name: DB_USERNAME
+          value: "supabase_admin"
+        - name: DB_DATABASE
+          value: "postgres"
+        - name: DB_HOSTNAME
+          value: "db"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_SCHEMA
+          value: "_analytics"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_SINGLE_TENANT
+          value: "true"
+        - name: LOGFLARE_SUPABASE_MODE
+          value: "true"
+        - name: LOGFLARE_MIN_CLUSTER_SIZE
+          value: "1"
+        - name: POSTGRES_BACKEND_SCHEMA
+          value: "_analytics"
+        - name: LOGFLARE_FEATURE_FLAG_OVERRIDE
+          value: "multibackend=true"
+        - name: LOGFLARE_SUPABASE_PROJECT_REF
+          value: "default"  # Or your actual project ref
+        # startupProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 4000
+        #   initialDelaySeconds: 20
+        #   periodSeconds: 5
+        #   timeoutSeconds: 3
+        #   failureThreshold: 20
+        # livenessProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 4000
+        #   initialDelaySeconds: 10
+        #   periodSeconds: 10
+        #   timeoutSeconds: 5
+        #   failureThreshold: 10
+        # readinessProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 4000
+        #   initialDelaySeconds: 5
+        #   periodSeconds: 5
+        #   timeoutSeconds: 3

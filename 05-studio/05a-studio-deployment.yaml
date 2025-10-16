@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: studio
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: studio
+  template:
+    metadata:
+      labels:
+        app: studio
+    spec:
+      containers:
+      - name: studio
+        image: supabase/studio:2025.08.11-sha-c538c4d #2025.06.30-sha-6f5982d
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: STUDIO_PG_META_URL
+          value: "http://meta:8080"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: DEFAULT_ORGANIZATION_NAME
+          value: "Default Organization"
+        - name: DEFAULT_PROJECT_NAME
+          value: "Default Project"
+        - name: SUPABASE_URL
+          value: "http://kong:8000"
+        - name: SUPABASE_PUBLIC_URL
+          value: "http://localhost:8000"
+        - name: SUPABASE_ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: ANON_KEY
+        - name: SUPABASE_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: SERVICE_ROLE_KEY
+        - name: AUTH_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: LOGFLARE_PRIVATE_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: LOGFLARE_URL
+          value: "http://analytics:4000"
+        - name: LOGFLARE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: NEXT_PUBLIC_ENABLE_LOGS
+          value: "true"
+        - name: NEXT_ANALYTICS_BACKEND_PROVIDER
+          value: "postgres"
+        - name: SUPABASE_STORAGE_URL
+          value: "http://kong:8000/storage/v1"

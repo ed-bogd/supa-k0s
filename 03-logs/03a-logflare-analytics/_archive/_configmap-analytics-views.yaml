@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-views
+  namespace: supabase
+data:
+  create-views.sql: |
+    -- Create views compatible with Supabase Studio's local dev queries
+    -- Studio expects to unnest metadata and then access request/response as nested arrays
+
+    -- Drop existing views
+    DROP VIEW IF EXISTS _analytics.postgres_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.edge_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.auth_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.realtime_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.storage_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.postgrest_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.function_logs CASCADE;
+    DROP VIEW IF EXISTS _analytics.function_edge_logs CASCADE;
+
+    -- Get the source tokens
+    DO $$
+    DECLARE
+      postgres_token uuid;
+      edge_token uuid;
+      auth_token uuid;
+      realtime_token uuid;
+      storage_token uuid;
+      postgrest_token uuid;
+      functions_token uuid;
+    BEGIN
+      -- Get tokens for each source
+      SELECT token INTO postgres_token FROM _analytics.sources WHERE name = 'postgres.logs';
+      SELECT token INTO edge_token FROM _analytics.sources WHERE name = 'cloudflare.logs.prod';
+      SELECT token INTO auth_token FROM _analytics.sources WHERE name = 'gotrue.logs.prod';
+      SELECT token INTO realtime_token FROM _analytics.sources WHERE name = 'realtime.logs.prod';
+      SELECT token INTO storage_token FROM _analytics.sources WHERE name = 'storage.logs.prod.2';
+      SELECT token INTO postgrest_token FROM _analytics.sources WHERE name = 'postgREST.logs.prod';
+      SELECT token INTO functions_token FROM _analytics.sources WHERE name = 'deno-relay-logs';
+      
+      -- Create simplified views - Studio will handle the unnesting in BigQuery style
+      -- For postgres, we just need the basic structure
+      IF postgres_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.postgres_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(postgres_token::text, '-', '_'));
+      END IF;
+      
+      IF edge_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.edge_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(edge_token::text, '-', '_'));
+      END IF;
+      
+      IF auth_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.auth_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(auth_token::text, '-', '_'));
+      END IF;
+      
+      IF realtime_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.realtime_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(realtime_token::text, '-', '_'));
+      END IF;
+      
+      IF storage_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.storage_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(storage_token::text, '-', '_'));
+      END IF;
+      
+      IF postgrest_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.postgrest_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(postgrest_token::text, '-', '_'));
+      END IF;
+      
+      IF functions_token IS NOT NULL THEN
+        EXECUTE format('CREATE VIEW _analytics.function_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(functions_token::text, '-', '_'));
+        EXECUTE format('CREATE VIEW _analytics.function_edge_logs AS SELECT id, timestamp, event_message, ARRAY[body->''metadata''] as metadata FROM _analytics.log_events_%s', replace(functions_token::text, '-', '_'));
+      END IF;
+    END $$;
+
+    -- Grant permissions on the schema and views
+    GRANT USAGE ON SCHEMA _analytics TO postgres, authenticator, supabase_admin;
+    GRANT SELECT ON ALL TABLES IN SCHEMA _analytics TO postgres, authenticator, supabase_admin;
+
+    -- Set default privileges for future tables/views in _analytics schema
+    ALTER DEFAULT PRIVILEGES IN SCHEMA _analytics GRANT SELECT ON TABLES TO postgres, authenticator, supabase_admin;

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong
+  namespace: supabase
+spec:
+  selector:
+    app: kong
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+    nodePort: 30800
+  - port: 8443
+    targetPort: 8443
+    name: https
+    nodePort: 30843
+  type: NodePort

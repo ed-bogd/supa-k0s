@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-realtime-user
+  namespace: supabase
+spec:
+  ttlSecondsAfterFinished: 100
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: create-user
+        image: postgres:15-alpine
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          psql -h db -U postgres -c "CREATE USER supabase_realtime WITH PASSWORD '$POSTGRES_PASSWORD';"
+          psql -h db -U postgres -c "GRANT ALL PRIVILEGES ON SCHEMA _realtime TO supabase_realtime;"
+          psql -h db -U postgres -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA _realtime TO supabase_realtime;"
+          psql -h db -U postgres -c "ALTER DEFAULT PRIVILEGES IN SCHEMA _realtime GRANT ALL ON TABLES TO supabase_realtime;"
+          psql -h db -U postgres -c "GRANT supabase_realtime TO postgres;"

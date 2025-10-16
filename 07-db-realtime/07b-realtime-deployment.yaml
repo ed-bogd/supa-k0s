@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime
+  namespace: supabase
+  labels:
+    app: realtime
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: realtime
+  template:
+    metadata:
+      labels:
+        app: realtime
+    spec:
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15-alpine
+        command: ['sh', '-c', 'until pg_isready -h db -p 5432 -U postgres; do echo waiting for db; sleep 2; done;']
+      # - name: init-db
+      #   image: postgres:15-alpine
+      #   env:
+      #   - name: POSTGRES_PASSWORD
+      #     valueFrom:
+      #       secretKeyRef:
+      #         name: supabase-secrets
+      #         key: POSTGRES_PASSWORD
+      #   - name: PGPASSWORD
+      #     valueFrom:
+      #       secretKeyRef:
+      #         name: supabase-secrets
+      #         key: POSTGRES_PASSWORD
+      #   - name: POSTGRES_USER
+      #     value: postgres
+      #   command: ["/bin/sh", "-c"]
+      #   args:
+      #   - |
+      #     psql -h db -U postgres -f /init/99-realtime.sql
+      #   volumeMounts:
+      #   - name: init-sql
+      #     mountPath: /init
+      containers:
+      - name: realtime
+        image: supabase/realtime:v2.53.2 #2.34.47
+        ports:
+        - containerPort: 4000
+          name: http
+        env:
+        - name: PORT
+          value: "4000"
+        - name: DB_HOST
+          value: "db"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_USER
+          value: "supabase_admin"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        - name: DB_NAME
+          value: "postgres"
+        - name: DB_AFTER_CONNECT_QUERY
+          value: 'SET search_path TO realtime'
+        - name: DB_ENC_KEY
+          value: "supabaserealtime"
+        - name: API_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: ANON_KEY
+        - name: SECRET_KEY_BASE
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: SECRET_KEY_BASE
+        - name: ERL_AFLAGS
+          value: "-proto_dist inet_tcp"
+        - name: DNS_NODES
+          value: "''"
+        - name: RLIMIT_NOFILE
+          value: "10000"
+        - name: APP_NAME
+          value: "realtime"
+        - name: SEED_SELF_HOST
+          value: "true"
+        - name: RUN_JANITOR
+          value: "true"
+      # volumes:
+      # - name: init-sql
+      #   configMap:
+      #     name: db-realtime-init

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage
+  template:
+    metadata:
+      labels:
+        app: storage
+    spec:
+      containers:
+      - name: storage
+        image: supabase/storage-api:latest #v1.25.7
+        ports:
+        - containerPort: 5000
+        env:
+        # - name: PGOPTIONS
+        #   value: "-c search_path=storage"  # Add this
+        - name: ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: ANON_KEY
+        - name: SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: SERVICE_ROLE_KEY
+        - name: POSTGREST_URL
+          value: "http://rest:3000"
+        - name: PGRST_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: JWT_SECRET
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: STORAGE_DATABASE_URL
+        - name: DB_INSTALL_ROLES
+          value: "false"
+        - name: FILE_SIZE_LIMIT
+          value: "52428800"
+        - name: STORAGE_BACKEND
+          value: "file"
+        - name: FILE_STORAGE_BACKEND_PATH
+          value: "/var/lib/storage"
+        - name: TENANT_ID
+          value: "stub"
+        - name: REGION
+          value: "stub"
+        - name: GLOBAL_S3_BUCKET
+          value: "stub"
+        - name: ENABLE_IMAGE_TRANSFORMATION
+          value: "true"
+        - name: IMGPROXY_URL
+          value: "http://imgproxy:5001"
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10

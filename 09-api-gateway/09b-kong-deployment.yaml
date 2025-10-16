@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: supabase
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+    spec:
+      initContainers:
+      - name: template-kong-config
+        image: busybox:latest
+        command:
+        - sh
+        - -c
+        - |
+          # Replace environment variables in kong template
+          export SUPABASE_ANON_KEY="${ANON_KEY}"
+          export SUPABASE_SERVICE_KEY="${SERVICE_ROLE_KEY}"
+          export DASHBOARD_USERNAME="${DASHBOARD_USERNAME}"
+          export DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD}"
+          
+          # Simple variable substitution
+          sed -e "s|\$SUPABASE_ANON_KEY|${SUPABASE_ANON_KEY}|g" \
+              -e "s|\$SUPABASE_SERVICE_KEY|${SUPABASE_SERVICE_KEY}|g" \
+              -e "s|\$DASHBOARD_USERNAME|${DASHBOARD_USERNAME}|g" \
+              -e "s|\$DASHBOARD_PASSWORD|${DASHBOARD_PASSWORD}|g" \
+              /kong-template/kong.yml > /kong-config/kong.yml
+        env:
+        - name: ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: ANON_KEY
+        - name: SERVICE_ROLE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: SERVICE_ROLE_KEY
+        - name: DASHBOARD_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: DASHBOARD_USERNAME
+        - name: DASHBOARD_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: DASHBOARD_PASSWORD
+        volumeMounts:
+        - name: kong-template
+          mountPath: /kong-template
+        - name: kong-processed
+          mountPath: /kong-config
+      containers:
+      - name: kong
+        image: kong:2.8.1
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8443
+          name: https
+        env:
+        - name: KONG_LOG_LEVEL
+          value: info
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: "/home/kong/kong.yml"
+        - name: KONG_DNS_ORDER
+          value: "LAST,A,CNAME"
+        - name: KONG_PLUGINS
+          value: "request-transformer,cors,key-auth,acl,basic-auth,http-log"
+        - name: KONG_NGINX_PROXY_PROXY_BUFFER_SIZE
+          value: "160k"
+        - name: KONG_NGINX_PROXY_PROXY_BUFFERS
+          value: "64 160k"
+        volumeMounts:
+        - name: kong-processed
+          mountPath: /home/kong
+      volumes:
+      - name: kong-template
+        configMap:
+          name: kong-config
+      - name: kong-processed
+        emptyDir: {}

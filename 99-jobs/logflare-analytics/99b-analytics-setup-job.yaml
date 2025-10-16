@@ -1,0 +1,139 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: analytics-setup
+  namespace: supabase
+spec:
+  ttlSecondsAfterFinished: 100
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        job: analytics-setup
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        command:
+          - sh
+          - -c
+          - |
+            echo "Waiting for PostgreSQL to be ready..."
+            for i in $(seq 1 60); do
+              if pg_isready -h db -p 5432 -U postgres 2>/dev/null; then
+                echo "PostgreSQL is ready"
+                exit 0
+              fi
+              echo "Waiting for PostgreSQL... ($i/60)"
+              sleep 2
+            done
+            echo "PostgreSQL did not become ready in time"
+            exit 1
+      
+      - name: wait-for-analytics
+        image: postgres:15-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        command:
+          - sh
+          - -c
+          - |
+            echo "Waiting for _analytics schema to exist..."
+            for i in $(seq 1 60); do
+              if psql -h db -U supabase_admin -d _supabase -c "SELECT 1 FROM pg_namespace WHERE nspname = '_analytics';" 2>/dev/null | grep -q '1 row'; then
+                echo "_analytics schema exists"
+                exit 0
+              fi
+              echo "Waiting for _analytics schema... ($i/60)"
+              sleep 3
+            done
+            echo "_analytics schema did not appear in time"
+            exit 1
+      
+      - name: wait-for-sources
+        image: postgres:15-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        command:
+          - sh
+          - -c
+          - |
+            echo "Waiting for analytics sources to be created..."
+            for i in $(seq 1 60); do
+              SOURCE_COUNT=$(psql -h db -U supabase_admin -d _supabase -t -c "SELECT COUNT(*) FROM _analytics.sources;" 2>/dev/null | tr -d ' ')
+              if [ "$SOURCE_COUNT" -gt 0 ]; then
+                echo "Analytics sources exist (count: $SOURCE_COUNT)"
+                exit 0
+              fi
+              echo "Waiting for sources... ($i/60)"
+              sleep 3
+            done
+            echo "Analytics sources did not appear in time"
+            exit 1
+      
+      containers:
+      - name: setup-analytics
+        image: postgres:15-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: supabase-secrets
+              key: POSTGRES_PASSWORD
+        command:
+          - sh
+          - -c
+          - |
+            echo "=== Step 1: Creating analytics views ==="
+            ls -l /sql/create-views.sql && sed -n '1,200p' /sql/create-views.sql
+            psql -h db -U supabase_admin -d _supabase -f /sql/create-views.sql
+            
+            echo ""
+            echo "=== Step 2: Updating source_mapping with actual UUIDs ==="
+            ls -l /sql/update-source-mapping.sql && sed -n '1,200p' /sql/update-source-mapping.sql
+            psql -h db -U supabase_admin -d _supabase -f /sql/update-source-mapping.sql
+            
+            echo ""
+            echo "=== Step 3: Updating endpoint query (update-endpoints.sql) ==="
+            if [ -f /sql/update-endpoints.sql ]; then
+              ls -l /sql/update-endpoints.sql && sed -n '1,200p' /sql/update-endpoints.sql
+              psql -h db -U supabase_admin -d _supabase -f /sql/update-endpoints.sql
+            else
+              echo "No update-endpoints.sql found, skipping endpoint update"
+            fi
+            
+            echo ""
+            echo "✅ Analytics setup complete!"
+            echo ""
+            echo "Verifying views:"
+            psql -h db -U supabase_admin -d _supabase -c "SELECT viewname FROM pg_views WHERE schemaname = '_analytics';"
+            
+            echo ""
+            echo "Verifying source_mapping:"
+            psql -h db -U supabase_admin -d _supabase -c "SELECT name, source_mapping FROM _analytics.endpoint_queries WHERE name = 'logs.all';"
+            echo ""
+            echo "Verifying endpoint query:"
+            psql -h db -U supabase_admin -d _supabase -c "SELECT name, LEFT(query, 200) FROM _analytics.endpoint_queries WHERE name = 'logs.all';"
+        volumeMounts:
+        - name: sql
+          mountPath: /sql
+          readOnly: true
+      volumes:
+      - name: sql
+        configMap:
+          name: analytics-setup

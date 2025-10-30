@@ -1,0 +1,41 @@
+{{- if and .Values.realtime.create .Values.realtime.job.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-realtime-user
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: realtime
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ttlSecondsAfterFinished: {{ .Values.realtime.job.ttlSecondsAfterFinished }}
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: create-user
+        image: "{{ .Values.realtime.initContainers.waitForDb.image.repository }}:{{ .Values.realtime.initContainers.waitForDb.image.tag }}"
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -c "CREATE USER supabase_realtime WITH PASSWORD '$POSTGRES_PASSWORD';"
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -c "GRANT ALL PRIVILEGES ON SCHEMA realtime TO supabase_realtime;"
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA realtime TO supabase_realtime;"
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -c "ALTER DEFAULT PRIVILEGES IN SCHEMA realtime GRANT ALL ON TABLES TO supabase_realtime;"
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -c "GRANT supabase_realtime TO {{ .Values.secrets.postgres.user }};"
+{{- end }}

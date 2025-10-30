@@ -1,0 +1,107 @@
+{{- if .Values.database.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.database.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.database.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.database.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.database.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+      - name: postgres
+        image: "{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+        imagePullPolicy: {{ .Values.database.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.secrets.postgres.port }}
+          name: postgres
+        env:
+        - name: POSTGRES_HOST
+          value: {{ .Values.database.env.host | quote }}
+        - name: PGPORT
+          value: {{ .Values.database.env.port | quote }}
+        - name: POSTGRES_PORT
+          value: {{ .Values.database.env.port | quote }}
+        - name: POSTGRES_DB
+          value: {{ .Values.database.env.database | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: JWT_EXP
+          value: {{ .Values.database.jwt.exp | quote }}
+        {{- if .Values.database.resources }}
+        resources:
+          {{- toYaml .Values.database.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        {{- if .Values.database.preInit.enabled }}
+        - name: db-pre-init
+          mountPath: /docker-entrypoint-initdb.d/00-init-roles.sh
+          subPath: 00-init-roles.sh
+        {{- end }}
+        {{- if .Values.database.persistence.enabled }}
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        {{- end }}
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+            - -h
+            - localhost
+          initialDelaySeconds: {{ .Values.database.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.database.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.database.livenessProbe.timeoutSeconds }}
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+            - -h
+            - localhost
+          initialDelaySeconds: {{ .Values.database.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.database.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.database.readinessProbe.timeoutSeconds }}
+      volumes:
+      {{- if .Values.database.preInit.enabled }}
+      - name: db-pre-init
+        configMap:
+          name: {{ .Values.database.name }}-pre-init
+          defaultMode: 0755
+      {{- end }}
+      {{- if .Values.database.persistence.enabled }}
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: {{ .Values.database.name }}-pvc
+      {{- end }}
+{{- end }}

@@ -1,0 +1,22 @@
+{{- if .Values.auth.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.auth.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: auth
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.auth.name }}
+  ports:
+  - port: {{ .Values.auth.service.port }}
+    targetPort: {{ .Values.auth.service.targetPort }}
+    name: http
+  type: {{ .Values.auth.service.type }}
+{{- end }}

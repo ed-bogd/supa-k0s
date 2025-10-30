@@ -1,0 +1,22 @@
+{{- if .Values.realtime.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.realtime.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: realtime
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.realtime.name }}
+  ports:
+  - port: {{ .Values.realtime.service.port }}
+    targetPort: {{ .Values.realtime.service.targetPort }}
+    name: http
+  type: {{ .Values.realtime.service.type }}
+{{- end }}

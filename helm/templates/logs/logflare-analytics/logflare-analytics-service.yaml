@@ -1,0 +1,22 @@
+{{- if .Values.analytics.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: logs
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.analytics.name }}
+  ports:
+  - port: {{ .Values.analytics.service.port }}
+    targetPort: {{ .Values.analytics.service.targetPort }}
+    name: http
+  type: {{ .Values.analytics.service.type }}
+{{- end }}

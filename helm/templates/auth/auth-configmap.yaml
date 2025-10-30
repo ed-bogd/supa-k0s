@@ -1,0 +1,74 @@
+{{- if .Values.auth.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-init-sql
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: auth
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  script.sh: |
+    #!/bin/bash
+    psql -h {{ .Values.secrets.postgres.host }} -U supabase_admin -d {{ .Values.secrets.postgres.database }} <<EOF
+    -- Set the password for supabase_auth_admin
+    ALTER USER supabase_auth_admin PASSWORD '$POSTGRES_PASSWORD';
+
+    -- Create auth schema if it doesn't exist
+    CREATE SCHEMA IF NOT EXISTS auth;
+    
+    -- Transfer ownership of auth schema
+    ALTER SCHEMA auth OWNER TO supabase_auth_admin;
+
+    -- Only move types if they exist in public schema
+    DO \$\$
+    BEGIN
+        -- Move factor_type if it exists
+        IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'factor_type' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) THEN
+            ALTER TYPE public.factor_type SET SCHEMA auth;
+            ALTER TYPE auth.factor_type OWNER TO supabase_auth_admin;
+        END IF;
+
+        -- Move factor_status if it exists
+        IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'factor_status' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) THEN
+            ALTER TYPE public.factor_status SET SCHEMA auth;
+            ALTER TYPE auth.factor_status OWNER TO supabase_auth_admin;
+        END IF;
+
+        -- Move aal_level if it exists
+        IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'aal_level' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) THEN
+            ALTER TYPE public.aal_level SET SCHEMA auth;
+            ALTER TYPE auth.aal_level OWNER TO supabase_auth_admin;
+        END IF;
+
+        -- Move code_challenge_method if it exists
+        IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'code_challenge_method' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) THEN
+            ALTER TYPE public.code_challenge_method SET SCHEMA auth;
+            ALTER TYPE auth.code_challenge_method OWNER TO supabase_auth_admin;
+        END IF;
+    END \$\$;
+
+    -- Transfer ownership of all tables in auth schema to supabase_auth_admin
+    DO \$\$
+    DECLARE
+        table_name TEXT;
+    BEGIN
+        FOR table_name IN
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'auth'
+        LOOP
+            EXECUTE 'ALTER TABLE auth.' || table_name || ' OWNER TO supabase_auth_admin;';
+        END LOOP;
+    END \$\$;
+
+    -- Display current ownership
+    SELECT schemaname, tablename, tableowner
+    FROM pg_tables
+    WHERE schemaname = 'auth';
+    EOF
+{{- end }}

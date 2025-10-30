@@ -1,0 +1,181 @@
+{{- if .Values.analytics.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.analytics.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: logs
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.analytics.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.analytics.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.analytics.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: logs
+    spec:
+      initContainers:
+      {{- if .Values.analytics.initContainers.waitForDb.enabled }}
+      - name: wait-for-db
+        image: "{{ .Values.analytics.initContainers.waitForDb.image.repository }}:{{ .Values.analytics.initContainers.waitForDb.image.tag }}"
+        command:
+          - sh
+          - -c
+          - |
+            until pg_isready -h {{ .Values.secrets.postgres.host }} -p {{ .Values.secrets.postgres.port }} -U {{ .Values.secrets.postgres.user }}; do
+              echo "Waiting for database to be ready..."
+              sleep 2
+            done
+            echo "Database is ready!"
+      {{- end }}
+      {{- if .Values.analytics.initContainers.createSchema.enabled }}
+      - name: create-schema
+        image: "{{ .Values.analytics.initContainers.waitForDb.image.repository }}:{{ .Values.analytics.initContainers.waitForDb.image.tag }}"
+        command: ["psql", "-h", "{{ .Values.secrets.postgres.host }}", "-U", "{{ .Values.secrets.postgres.user }}", "-d", "{{ .Values.secrets.postgres.database }}", "-f", "/scripts/create_schema.sql"]
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: schema-script
+          mountPath: /scripts
+      {{- end }}
+      {{- if .Values.analytics.initContainers.runMigrations.enabled }}
+      - name: run-migrations
+        image: "{{ .Values.analytics.image.repository }}:{{ .Values.analytics.image.migrationTag }}"
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_NODE_HOST
+          value: {{ .Values.analytics.nodeHost | quote }}
+        - name: DB_USERNAME
+          value: {{ .Values.analytics.database.username | quote }}
+        - name: DB_DATABASE
+          value: {{ .Values.analytics.database.database | quote }}
+        - name: DB_HOSTNAME
+          value: {{ .Values.secrets.postgres.host | quote }}
+        - name: DB_PORT
+          value: {{ .Values.secrets.postgres.port | quote }}
+        - name: DB_SCHEMA
+          value: {{ .Values.analytics.database.schema | quote }}
+        - name: LOGFLARE_SINGLE_TENANT
+          value: {{ .Values.analytics.singleTenant | quote }}
+        - name: LOGFLARE_SUPABASE_MODE
+          value: {{ .Values.analytics.supabaseMode | quote }}
+        - name: POSTGRES_BACKEND_SCHEMA
+          value: {{ .Values.analytics.database.schema | quote }}
+        command:
+          - sh
+          - -c
+          - |
+            echo "Starting migrations at $(date)"
+            export POSTGRES_BACKEND_URL="postgresql://{{ .Values.analytics.database.username }}:${DB_PASSWORD}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+            /opt/app/rel/logflare/bin/logflare eval "Logflare.Release.migrate"
+            echo "Migrations completed at $(date)"
+      {{- end }}
+      volumes:
+      - name: schema-script
+        configMap:
+          name: analytics-schema-config
+      containers:
+      - name: analytics
+        image: "{{ .Values.analytics.image.repository }}:{{ .Values.analytics.image.tag }}"
+        imagePullPolicy: {{ .Values.analytics.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.analytics.containerPort }}
+          name: http
+        command:
+          - sh
+          - -c
+          - |
+            export POSTGRES_BACKEND_URL="postgresql://{{ .Values.analytics.database.username }}:${DB_PASSWORD}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+            exec /opt/app/rel/logflare/bin/logflare start
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_PUBLIC_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: LOGFLARE_PUBLIC_ACCESS_TOKEN
+        - name: LOGFLARE_PRIVATE_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: LOGFLARE_NODE_HOST
+          value: {{ .Values.analytics.nodeHost | quote }}
+        - name: DB_USERNAME
+          value: {{ .Values.analytics.database.username | quote }}
+        - name: DB_DATABASE
+          value: {{ .Values.analytics.database.database | quote }}
+        - name: DB_HOSTNAME
+          value: {{ .Values.secrets.postgres.host | quote }}
+        - name: DB_PORT
+          value: {{ .Values.secrets.postgres.port | quote }}
+        - name: DB_SCHEMA
+          value: {{ .Values.analytics.database.schema | quote }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: LOGFLARE_SINGLE_TENANT
+          value: {{ .Values.analytics.singleTenant | quote }}
+        - name: LOGFLARE_SUPABASE_MODE
+          value: {{ .Values.analytics.supabaseMode | quote }}
+        - name: LOGFLARE_MIN_CLUSTER_SIZE
+          value: {{ .Values.analytics.minClusterSize | quote }}
+        - name: POSTGRES_BACKEND_SCHEMA
+          value: {{ .Values.analytics.database.schema | quote }}
+        - name: LOGFLARE_FEATURE_FLAG_OVERRIDE
+          value: {{ .Values.analytics.featureFlagOverride | quote }}
+        - name: LOGFLARE_SUPABASE_PROJECT_REF
+          value: {{ .Values.analytics.supabaseProjectRef | quote }}
+        {{- if .Values.analytics.resources }}
+        resources:
+          {{- toYaml .Values.analytics.resources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.analytics.probes.enabled }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.analytics.probes.path }}
+            port: {{ .Values.analytics.probes.port }}
+          initialDelaySeconds: {{ .Values.analytics.probes.startup.initialDelaySeconds }}
+          periodSeconds: {{ .Values.analytics.probes.startup.periodSeconds }}
+          timeoutSeconds: {{ .Values.analytics.probes.startup.timeoutSeconds }}
+          failureThreshold: {{ .Values.analytics.probes.startup.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.analytics.probes.path }}
+            port: {{ .Values.analytics.probes.port }}
+          initialDelaySeconds: {{ .Values.analytics.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.analytics.probes.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.analytics.probes.liveness.timeoutSeconds }}
+          failureThreshold: {{ .Values.analytics.probes.liveness.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.analytics.probes.path }}
+            port: {{ .Values.analytics.probes.port }}
+          initialDelaySeconds: {{ .Values.analytics.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.analytics.probes.readiness.periodSeconds }}
+          timeoutSeconds: {{ .Values.analytics.probes.readiness.timeoutSeconds }}
+        {{- end }}
+{{- end }}

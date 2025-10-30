@@ -1,0 +1,16 @@
+{{- if .Values.imgproxy.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supabase-config
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  imgproxy-enable-webp-detection: {{ .Values.imgproxy.enableWebpDetection | quote }}
+{{- end }}

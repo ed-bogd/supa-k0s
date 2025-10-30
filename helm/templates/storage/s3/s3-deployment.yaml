@@ -1,0 +1,99 @@
+{{- if .Values.storage.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.storage.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.storage.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.storage.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.storage.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: storage
+    spec:
+      {{- if .Values.storage.persistence.enabled }}
+      volumes:
+      - name: storage-volume
+        persistentVolumeClaim:
+          claimName: supabase-storage-pvc
+      {{- end }}
+      containers:
+      - name: storage
+        image: "{{ .Values.storage.image.repository }}:{{ .Values.storage.image.tag }}"
+        imagePullPolicy: {{ .Values.storage.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.storage.containerPort }}
+        env:
+        - name: ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: ANON_KEY
+        - name: SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: SERVICE_ROLE_KEY
+        - name: POSTGREST_URL
+          value: {{ .Values.storage.postgrestUrl | quote }}
+        - name: PGRST_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: DATABASE_URL
+          value: {{ tpl .Values.storage.database.url . | quote }}
+        - name: DB_INSTALL_ROLES
+          value: {{ .Values.storage.database.installRoles | quote }}
+        - name: FILE_SIZE_LIMIT
+          value: {{ .Values.storage.fileSizeLimit | quote }}
+        - name: STORAGE_BACKEND
+          value: {{ .Values.storage.storageBackend | quote }}
+        - name: FILE_STORAGE_BACKEND_PATH
+          value: {{ .Values.storage.fileStorageBackendPath | quote }}
+        - name: TENANT_ID
+          value: {{ .Values.storage.tenantId | quote }}
+        - name: REGION
+          value: {{ .Values.storage.region | quote }}
+        - name: GLOBAL_S3_BUCKET
+          value: {{ .Values.storage.globalS3Bucket | quote }}
+        - name: ENABLE_IMAGE_TRANSFORMATION
+          value: {{ .Values.storage.enableImageTransformation | quote }}
+        - name: IMGPROXY_URL
+          value: {{ .Values.storage.imgproxyUrl | quote }}
+        {{- if .Values.storage.persistence.enabled }}
+        volumeMounts:
+        - name: storage-volume
+          mountPath: {{ .Values.storage.fileStorageBackendPath }}
+        {{- end }}
+        {{- if .Values.storage.resources }}
+        resources:
+          {{- toYaml .Values.storage.resources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.storage.probes.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.storage.probes.path }}
+            port: {{ .Values.storage.containerPort }}
+          initialDelaySeconds: {{ .Values.storage.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.storage.probes.liveness.periodSeconds }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.storage.probes.path }}
+            port: {{ .Values.storage.containerPort }}
+          initialDelaySeconds: {{ .Values.storage.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.storage.probes.readiness.periodSeconds }}
+        {{- end }}
+{{- end }}

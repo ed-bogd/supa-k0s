@@ -1,0 +1,86 @@
+{{- if .Values.studio.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.studio.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: studio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.studio.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.studio.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.studio.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: studio
+    spec:
+      containers:
+      - name: studio
+        image: "{{ .Values.studio.image.repository }}:{{ .Values.studio.image.tag }}"
+        imagePullPolicy: {{ .Values.studio.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.studio.containerPort }}
+          name: http
+        env:
+        - name: STUDIO_PG_META_URL
+          value: {{ .Values.studio.pgMetaUrl | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: DEFAULT_ORGANIZATION_NAME
+          value: {{ .Values.studio.defaultOrganization | quote }}
+        - name: DEFAULT_PROJECT_NAME
+          value: {{ .Values.studio.defaultProject | quote }}
+        - name: SUPABASE_URL
+          value: {{ .Values.studio.supabaseUrl | quote }}
+        - name: SUPABASE_PUBLIC_URL
+          value: {{ .Values.studio.supabasePublicUrl | quote }}
+        - name: SUPABASE_ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: ANON_KEY
+        - name: SUPABASE_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: SERVICE_ROLE_KEY
+        - name: AUTH_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: LOGFLARE_PRIVATE_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: LOGFLARE_URL
+          value: {{ .Values.studio.logflareUrl | quote }}
+        - name: LOGFLARE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: LOGFLARE_PRIVATE_ACCESS_TOKEN
+        - name: NEXT_PUBLIC_ENABLE_LOGS
+          value: {{ .Values.studio.enableLogs | quote }}
+        - name: NEXT_ANALYTICS_BACKEND_PROVIDER
+          value: {{ .Values.studio.analyticsBackendProvider | quote }}
+        - name: SUPABASE_STORAGE_URL
+          value: {{ .Values.studio.storageUrl | quote }}
+        {{- if .Values.studio.resources }}
+        resources:
+          {{- toYaml .Values.studio.resources | nindent 10 }}
+        {{- end }}
+{{- end }}

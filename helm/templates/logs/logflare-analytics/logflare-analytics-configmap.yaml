@@ -1,0 +1,17 @@
+{{- if .Values.analytics.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-schema-config
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: logs
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  create_schema.sql: |
+    CREATE SCHEMA IF NOT EXISTS _analytics;
+{{- end }}

@@ -1,0 +1,146 @@
+{{- if .Values.auth.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.auth.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: auth
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.auth.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.auth.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.auth.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: auth
+    spec:
+      volumes:
+      - name: auth-init-sql
+        configMap:
+          name: auth-init-sql
+      initContainers:
+      {{- if .Values.auth.initContainers.waitForDb.enabled }}
+      - name: wait-for-db
+        image: "{{ .Values.auth.initContainers.waitForDb.image.repository }}:{{ .Values.auth.initContainers.waitForDb.image.tag }}"
+        command: ['sh', '-c', 'until nc -z {{ .Values.secrets.postgres.host }} {{ .Values.secrets.postgres.port }}; do echo waiting for db; sleep 2; done;']
+      {{- end }}
+      {{- if .Values.auth.initContainers.initSchema.enabled }}
+      - name: init-auth-schema
+        image: "{{ .Values.auth.initContainers.initSchema.image.repository }}:{{ .Values.auth.initContainers.initSchema.image.tag }}"
+        command: ['sh', '/script.sh']
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: auth-init-sql
+          mountPath: /script.sh
+          subPath: script.sh
+      {{- end }}
+      containers:
+      - name: auth
+        image: "{{ .Values.auth.image.repository }}:{{ .Values.auth.image.tag }}"
+        imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.auth.containerPort }}
+          name: http
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: GOTRUE_API_HOST
+          value: {{ .Values.auth.apiHost | quote }}
+        - name: GOTRUE_API_PORT
+          value: {{ .Values.auth.apiPort | quote }}
+        - name: API_EXTERNAL_URL
+          value: {{ .Values.auth.apiExternalUrl | quote }}
+        - name: GOTRUE_DB_DRIVER
+          value: {{ .Values.auth.database.driver | quote }}
+        - name: GOTRUE_DB_DATABASE_URL
+          value: {{ tpl .Values.auth.database.url . | quote }}
+        - name: GOTRUE_SITE_URL
+          value: {{ .Values.auth.siteUrl | quote }}
+        - name: GOTRUE_URI_ALLOW_LIST
+          value: {{ .Values.auth.uriAllowList | quote }}
+        - name: GOTRUE_DISABLE_SIGNUP
+          value: {{ .Values.auth.disableSignup | quote }}
+        - name: GOTRUE_JWT_ADMIN_ROLES
+          value: {{ .Values.auth.jwt.adminRoles | quote }}
+        - name: GOTRUE_JWT_AUD
+          value: {{ .Values.auth.jwt.aud | quote }}
+        - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+          value: {{ .Values.auth.jwt.defaultGroupName | quote }}
+        - name: GOTRUE_JWT_EXP
+          value: {{ .Values.auth.jwt.exp | quote }}
+        - name: GOTRUE_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+          value: {{ .Values.auth.external.emailEnabled | quote }}
+        - name: GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED
+          value: {{ .Values.auth.external.anonymousUsersEnabled | quote }}
+        - name: GOTRUE_MAILER_AUTOCONFIRM
+          value: {{ .Values.auth.mailer.autoconfirm | quote }}
+        - name: GOTRUE_SMTP_ADMIN_EMAIL
+          value: {{ .Values.auth.mailer.adminEmail | quote }}
+        - name: GOTRUE_SMTP_HOST
+          value: {{ .Values.auth.smtp.host | quote }}
+        - name: GOTRUE_SMTP_PORT
+          value: {{ .Values.auth.smtp.port | quote }}
+        - name: GOTRUE_SMTP_USER
+          value: {{ .Values.auth.smtp.user | quote }}
+        - name: GOTRUE_SMTP_PASS
+          value: {{ .Values.auth.smtp.pass | quote }}
+        - name: GOTRUE_SMTP_SENDER_NAME
+          value: {{ .Values.auth.mailer.senderName | quote }}
+        - name: GOTRUE_MAILER_URLPATHS_INVITE
+          value: {{ .Values.auth.mailer.urlPaths.invite | quote }}
+        - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
+          value: {{ .Values.auth.mailer.urlPaths.confirmation | quote }}
+        - name: GOTRUE_MAILER_URLPATHS_RECOVERY
+          value: {{ .Values.auth.mailer.urlPaths.recovery | quote }}
+        - name: GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE
+          value: {{ .Values.auth.mailer.urlPaths.emailChange | quote }}
+        - name: GOTRUE_EXTERNAL_PHONE_ENABLED
+          value: {{ .Values.auth.external.phoneEnabled | quote }}
+        - name: GOTRUE_SMS_AUTOCONFIRM
+          value: {{ .Values.auth.sms.autoconfirm | quote }}
+        {{- if .Values.auth.resources }}
+        resources:
+          {{- toYaml .Values.auth.resources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.auth.probes.enabled }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.auth.containerPort }}
+          initialDelaySeconds: {{ .Values.auth.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.auth.probes.liveness.periodSeconds }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.auth.containerPort }}
+          initialDelaySeconds: {{ .Values.auth.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.auth.probes.readiness.periodSeconds }}
+        {{- end }}
+{{- end }}

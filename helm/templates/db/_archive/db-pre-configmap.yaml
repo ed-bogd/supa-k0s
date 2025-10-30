@@ -1,0 +1,99 @@
+{{- if .Values.database.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.database.name }}-pre-init
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  00-init-roles.sh: |
+    #!/bin/bash
+    set -e
+    
+    # This runs BEFORE migrate.sh to create necessary roles
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+      -- Create roles if they don't exist
+      DO \$\$
+      BEGIN
+        -- Create supabase_admin role
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin') THEN
+          CREATE ROLE supabase_admin LOGIN CREATEROLE CREATEDB REPLICATION BYPASSRLS SUPERUSER PASSWORD '${POSTGRES_PASSWORD}';
+        ELSE
+          ALTER ROLE supabase_admin WITH SUPERUSER;
+        END IF;
+        
+        -- Create other necessary roles
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+          CREATE ROLE supabase_auth_admin NOINHERIT CREATEROLE LOGIN NOREPLICATION PASSWORD '${POSTGRES_PASSWORD}';
+        END IF;
+        
+        -- Grant auth admin ability to create schemas and tables
+        ALTER ROLE supabase_auth_admin CREATEDB;
+        ALTER DATABASE postgres OWNER TO postgres;
+        GRANT CREATE ON DATABASE postgres TO supabase_auth_admin;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_storage_admin') THEN
+          CREATE ROLE supabase_storage_admin NOINHERIT CREATEROLE LOGIN NOREPLICATION PASSWORD '${POSTGRES_PASSWORD}';
+        END IF;
+        
+        -- Grant storage admin ability to create schemas and tables
+        GRANT CREATE ON DATABASE postgres TO supabase_storage_admin;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_functions_admin') THEN
+          CREATE ROLE supabase_functions_admin NOINHERIT CREATEROLE LOGIN NOREPLICATION PASSWORD '${POSTGRES_PASSWORD}';
+        END IF;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticator') THEN
+          CREATE ROLE authenticator NOINHERIT LOGIN NOREPLICATION PASSWORD '${POSTGRES_PASSWORD}';
+        END IF;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'pgbouncer') THEN
+          CREATE ROLE pgbouncer LOGIN PASSWORD '${POSTGRES_PASSWORD}';
+        END IF;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
+          CREATE ROLE anon NOLOGIN NOINHERIT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
+          CREATE ROLE authenticated NOLOGIN NOINHERIT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
+          CREATE ROLE service_role NOLOGIN NOREPLICATION BYPASSRLS;
+        END IF;
+        
+        -- Grant necessary permissions
+        GRANT anon, authenticated, service_role TO authenticator;
+        GRANT anon, authenticated, service_role TO postgres;
+        GRANT supabase_auth_admin TO postgres;
+        GRANT supabase_storage_admin TO postgres;
+        GRANT supabase_functions_admin TO postgres;
+        GRANT service_role TO supabase_storage_admin;
+        
+        -- Create auth schema (GoTrue expects it to exist)
+        CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
+        
+        -- Grant permissions on public schema for admin roles
+        GRANT ALL ON SCHEMA public TO supabase_auth_admin;
+        GRANT ALL ON SCHEMA public TO supabase_storage_admin;
+        GRANT ALL ON SCHEMA public TO supabase_functions_admin;
+        
+        -- Grant permissions on auth schema
+        GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+        GRANT USAGE ON SCHEMA auth TO postgres, anon, authenticated, service_role;
+        GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
+        GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
+      END
+      \$\$;
+    EOSQL
+
+{{- end }}

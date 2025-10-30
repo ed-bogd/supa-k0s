@@ -1,0 +1,22 @@
+{{- if .Values.storage.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.storage.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.storage.service.type }}
+  selector:
+    app: {{ .Values.storage.name }}
+  ports:
+  - port: {{ .Values.storage.service.port }}
+    targetPort: {{ .Values.storage.service.targetPort }}
+    protocol: TCP
+{{- end }}

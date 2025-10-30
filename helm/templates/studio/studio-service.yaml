@@ -1,0 +1,22 @@
+{{- if .Values.studio.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.studio.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: studio
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.studio.name }}
+  ports:
+  - port: {{ .Values.studio.service.port }}
+    targetPort: {{ .Values.studio.service.targetPort }}
+    name: http
+  type: {{ .Values.studio.service.type }}
+{{- end }}

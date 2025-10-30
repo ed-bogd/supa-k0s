@@ -1,0 +1,120 @@
+{{- if .Values.realtime.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.realtime.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: realtime
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.realtime.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.realtime.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.realtime.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: realtime
+    spec:
+      initContainers:
+      {{- if .Values.realtime.initContainers.waitForDb.enabled }}
+      - name: wait-for-db
+        image: "{{ .Values.realtime.initContainers.waitForDb.image.repository }}:{{ .Values.realtime.initContainers.waitForDb.image.tag }}"
+        command: ['sh', '-c', 'until pg_isready -h {{ .Values.realtime.database.host }} -p {{ .Values.realtime.database.port }} -U {{ .Values.secrets.postgres.user }}; do echo waiting for db; sleep 2; done;']
+      {{- end }}
+      {{- if .Values.realtime.initContainers.initDb.enabled }}
+      - name: init-db
+        image: "{{ .Values.realtime.initContainers.initDb.image.repository }}:{{ .Values.realtime.initContainers.initDb.image.tag }}"
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_USER
+          value: {{ .Values.secrets.postgres.user }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          psql -h {{ .Values.realtime.database.host }} -U {{ .Values.secrets.postgres.user }} -f /init/99-realtime.sql
+        volumeMounts:
+        - name: init-sql
+          mountPath: /init
+      {{- end }}
+      containers:
+      - name: realtime
+        image: "{{ .Values.realtime.image.repository }}:{{ .Values.realtime.image.tag }}"
+        imagePullPolicy: {{ .Values.realtime.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.realtime.containerPort }}
+          name: http
+        env:
+        - name: PORT
+          value: {{ .Values.realtime.port | quote }}
+        - name: DB_HOST
+          value: {{ .Values.realtime.database.host | quote }}
+        - name: DB_PORT
+          value: {{ .Values.realtime.database.port | quote }}
+        - name: DB_USER
+          value: {{ .Values.realtime.database.user | quote }}
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: DB_NAME
+          value: {{ .Values.realtime.database.name | quote }}
+        - name: DB_AFTER_CONNECT_QUERY
+          value: {{ .Values.realtime.database.afterConnectQuery | quote }}
+        - name: DB_ENC_KEY
+          value: {{ .Values.realtime.database.encKey | quote }}
+        - name: API_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: ANON_KEY
+        - name: SECRET_KEY_BASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: SECRET_KEY_BASE
+        - name: ERL_AFLAGS
+          value: {{ .Values.realtime.erlAflags | quote }}
+        - name: DNS_NODES
+          value: {{ .Values.realtime.dnsNodes | quote }}
+        - name: RLIMIT_NOFILE
+          value: {{ .Values.realtime.rlimitNofile | quote }}
+        - name: APP_NAME
+          value: {{ .Values.realtime.appName | quote }}
+        - name: SEED_SELF_HOST
+          value: {{ .Values.realtime.seedSelfHost | quote }}
+        - name: RUN_JANITOR
+          value: {{ .Values.realtime.runJanitor | quote }}
+        {{- if .Values.realtime.resources }}
+        resources:
+          {{- toYaml .Values.realtime.resources | nindent 10 }}
+        {{- end }}
+      {{- if .Values.realtime.initContainers.initDb.enabled }}
+      volumes:
+      - name: init-sql
+        configMap:
+          name: db-realtime-init
+      {{- end }}
+{{- end }}

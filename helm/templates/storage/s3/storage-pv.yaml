@@ -1,0 +1,29 @@
+{{- if and .Values.storage.create .Values.storage.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: supabase-storage-pv
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  capacity:
+    storage: {{ .Values.storage.persistence.size }}
+  volumeMode: Filesystem
+  accessModes:
+    - {{ .Values.storage.persistence.accessMode }}
+  persistentVolumeReclaimPolicy: Retain
+  {{- if .Values.storage.persistence.storageClass }}
+  storageClassName: {{ .Values.storage.persistence.storageClass }}
+  {{- end }}
+  local:
+    path: /mnt/data/supabase-storage
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - {{ .Values.storage.persistence.nodeName | default "minikube" }}
+{{- end }}

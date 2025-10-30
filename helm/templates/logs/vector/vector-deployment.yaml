@@ -1,0 +1,115 @@
+{{- if .Values.vector.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.vector.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: logs
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.vector.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.vector.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.vector.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: logs
+    spec:
+      serviceAccountName: {{ .Values.vector.rbac.serviceAccountName }}
+      containers:
+      - name: vector
+        image: "{{ .Values.vector.image.repository }}:{{ .Values.vector.image.tag }}"
+        imagePullPolicy: {{ .Values.vector.image.pullPolicy }}
+        args:
+          - --config
+          - {{ .Values.vector.volumes.config.mountPath }}/vector.yml
+        ports:
+        - containerPort: {{ .Values.vector.containerPort }}
+          name: api
+        securityContext:
+          readOnlyRootFilesystem: {{ .Values.vector.securityContext.readOnlyRootFilesystem }}
+        env:
+        - name: LOGFLARE_PUBLIC_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: LOGFLARE_PUBLIC_ACCESS_TOKEN
+        - name: VECTOR_SELF_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: VECTOR_SELF_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: VECTOR_SELF_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- if .Values.vector.resources }}
+        resources:
+          {{- toYaml .Values.vector.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        {{- if .Values.vector.volumes.config.enabled }}
+        - name: config
+          mountPath: {{ .Values.vector.volumes.config.mountPath }}
+          readOnly: true
+        {{- end }}
+        {{- if .Values.vector.volumes.data.enabled }}
+        - name: data
+          mountPath: {{ .Values.vector.volumes.data.mountPath }}
+        {{- end }}
+        {{- if .Values.vector.volumes.varLog.enabled }}
+        - name: var-log
+          mountPath: {{ .Values.vector.volumes.varLog.mountPath }}
+          readOnly: true
+        {{- end }}
+        {{- if .Values.vector.volumes.varLib.enabled }}
+        - name: var-lib
+          mountPath: {{ .Values.vector.volumes.varLib.mountPath }}
+          readOnly: true
+        {{- end }}
+        {{- if .Values.vector.probes.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.vector.probes.path }}
+            port: {{ .Values.vector.probes.port }}
+          initialDelaySeconds: {{ .Values.vector.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.vector.probes.liveness.periodSeconds }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.vector.probes.path }}
+            port: {{ .Values.vector.probes.port }}
+          initialDelaySeconds: {{ .Values.vector.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.vector.probes.readiness.periodSeconds }}
+        {{- end }}
+      volumes:
+      {{- if .Values.vector.volumes.config.enabled }}
+      - name: config
+        configMap:
+          name: {{ .Values.vector.volumes.config.configMapName }}
+      {{- end }}
+      {{- if .Values.vector.volumes.data.enabled }}
+      - name: data
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.vector.volumes.varLog.enabled }}
+      - name: var-log
+        hostPath:
+          path: {{ .Values.vector.volumes.varLog.hostPath }}
+      {{- end }}
+      {{- if .Values.vector.volumes.varLib.enabled }}
+      - name: var-lib
+        hostPath:
+          path: {{ .Values.vector.volumes.varLib.hostPath }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,17 @@
+{{- if .Values.functions.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: functions-code
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: edge-functions
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  index.ts: |
+{{ .Values.functions.functionCode | indent 4 }}
+{{- end }}

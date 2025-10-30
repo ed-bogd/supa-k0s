@@ -1,0 +1,124 @@
+{{- if .Values.rest.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.rest.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.rest.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.rest.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.rest.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      volumes:
+      - name: rest-init-sql
+        configMap:
+          name: rest-init-sql
+      initContainers:
+      {{- if .Values.rest.initContainers.waitForDb.enabled }}
+      - name: wait-for-db
+        image: "{{ .Values.rest.initContainers.waitForDb.image.repository }}:{{ .Values.rest.initContainers.waitForDb.image.tag }}"
+        command: ['sh', '-c', 'until nc -z {{ .Values.secrets.postgres.host }} {{ .Values.secrets.postgres.port }}; do echo waiting for db; sleep 2; done;']
+      {{- end }}
+      {{- if .Values.rest.initContainers.initRestAuth.enabled }}
+      - name: init-rest-auth
+        image: "{{ .Values.rest.initContainers.initRestAuth.image.repository }}:{{ .Values.rest.initContainers.initRestAuth.image.tag }}"
+        command: ['sh', '-c', 'psql -h {{ .Values.secrets.postgres.host }} -U supabase_admin -d {{ .Values.secrets.postgres.database }} -f /init.sql']
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: rest-init-sql
+          mountPath: /init.sql
+          subPath: init.sql
+      {{- end }}
+      containers:
+      - name: rest
+        image: "{{ .Values.rest.image.repository }}:{{ .Values.rest.image.tag }}"
+        imagePullPolicy: {{ .Values.rest.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.rest.containerPorts.rest }}
+          name: rest
+        env:
+        - name: PGRST_LOG_LEVEL
+          value: {{ .Values.rest.logLevel | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: PGRST_OPENAPI_SERVER_PROXY_URI
+          value: {{ .Values.rest.openapi.serverProxyUri | quote }}
+        - name: PGRST_OPENAPI_SECURITY_ACTIVE
+          value: {{ .Values.rest.openapi.securityActive | quote }}
+        - name: PGRST_DB_URI
+          value: {{ tpl .Values.rest.database.uri . | quote }}
+        - name: PGRST_DB_SCHEMAS
+          value: {{ .Values.rest.database.schemas | quote }}
+        - name: PGRST_DB_ANON_ROLE
+          value: {{ .Values.rest.database.anonRole | quote }}
+        - name: PGRST_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: PGRST_DB_USE_LEGACY_GUCS
+          value: {{ .Values.rest.database.useLegacyGucs | quote }}
+        - name: PGRST_APP_SETTINGS_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: PGRST_APP_SETTINGS_JWT_EXP
+          value: {{ .Values.rest.jwt.exp | quote }}
+        {{- if .Values.rest.resources }}
+        resources:
+          {{- toYaml .Values.rest.resources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.rest.probes.enabled }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: {{ .Values.rest.containerPorts.rest }}
+          initialDelaySeconds: {{ .Values.rest.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.rest.probes.liveness.periodSeconds }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: {{ .Values.rest.containerPorts.rest }}
+          initialDelaySeconds: {{ .Values.rest.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.rest.probes.readiness.periodSeconds }}
+        {{- end }}
+      - name: swaggerui
+        image: "{{ .Values.rest.swaggerui.image.repository }}:{{ .Values.rest.swaggerui.image.tag }}"
+        imagePullPolicy: {{ .Values.rest.swaggerui.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.rest.containerPorts.swagger }}
+          name: swagger
+        env:
+        - name: SWAGGER_JSON_URL
+          value: {{ .Values.rest.swagger.jsonUrl | quote }}
+        - name: BASE_URL
+          value: {{ .Values.rest.swagger.baseUrl | quote }}
+{{- end }}

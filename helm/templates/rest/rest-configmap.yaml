@@ -1,0 +1,19 @@
+{{- if .Values.rest.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rest-init-sql
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  init.sql: |
+    \set POSTGRES_PASSWORD `echo "$POSTGRES_PASSWORD"`
+
+    ALTER USER authenticator PASSWORD :'POSTGRES_PASSWORD';
+{{- end }}

@@ -1,0 +1,25 @@
+{{- if .Values.rest.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.rest.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.rest.name }}
+  ports:
+  - port: {{ .Values.rest.service.ports.rest.port }}
+    targetPort: {{ .Values.rest.service.ports.rest.targetPort }}
+    name: rest
+  - port: {{ .Values.rest.service.ports.swagger.port }}
+    targetPort: {{ .Values.rest.service.ports.swagger.targetPort }}
+    name: swagger
+  type: {{ .Values.rest.service.type }}
+{{- end }}

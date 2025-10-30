@@ -1,0 +1,135 @@
+{{- if .Values.supavisor.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.supavisor.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.supavisor.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.supavisor.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.supavisor.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      volumes:
+      - name: supavisor-init
+        configMap:
+          name: db-supavisor-init
+      initContainers:
+      {{- if .Values.supavisor.initContainers.waitForDb.enabled }}
+      - name: wait-for-db
+        image: "{{ .Values.supavisor.initContainers.waitForDb.image.repository }}:{{ .Values.supavisor.initContainers.waitForDb.image.tag }}"
+        command: ['sh', '-c', 'until nc -z {{ .Values.secrets.postgres.host }} {{ .Values.secrets.postgres.port }}; do echo waiting for db; sleep 2; done;']
+      {{- end }}
+      {{- if .Values.supavisor.initContainers.runInitSql.enabled }}
+      - name: run-supavisor-init-sql
+        image: "{{ .Values.supavisor.initContainers.runInitSql.image.repository }}:{{ .Values.supavisor.initContainers.runInitSql.image.tag }}"
+        command: ['psql', '-h', '{{ .Values.secrets.postgres.host }}', '-U', '{{ .Values.secrets.postgres.user }}', '-d', '{{ .Values.secrets.postgres.database }}', '-f', '/sql/99-supavisor.sql']
+        env:
+        - name: POSTGRES_USER
+          value: "supabase_admin"
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: supavisor-init
+          mountPath: /sql/
+      {{- end }}
+      containers:
+      - name: supavisor
+        image: "{{ .Values.supavisor.image.repository }}:{{ .Values.supavisor.image.tag }}"
+        imagePullPolicy: {{ .Values.supavisor.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.supavisor.containerPorts.api }}
+          name: api
+        - containerPort: {{ .Values.supavisor.containerPorts.postgres }}
+          name: postgres
+        - containerPort: {{ .Values.supavisor.containerPorts.transaction }}
+          name: transaction
+        env:
+        - name: PORT
+          value: {{ .Values.supavisor.port | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_PORT
+          value: {{ .Values.supavisor.database.port | quote }}
+        - name: POSTGRES_DB
+          value: {{ .Values.supavisor.database.name | quote }}
+        - name: DATABASE_URL
+          value: {{ tpl .Values.supavisor.database.url . | quote }}
+        - name: CLUSTER_POSTGRES
+          value: {{ .Values.supavisor.clusterPostgres | quote }}
+        - name: SECRET_KEY_BASE
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: SECRET_KEY_BASE
+        - name: VAULT_ENC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: VAULT_ENC_KEY
+        - name: API_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: METRICS_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: JWT_SECRET
+        - name: REGION
+          value: {{ .Values.supavisor.region | quote }}
+        - name: ERL_AFLAGS
+          value: {{ .Values.supavisor.erlAflags | quote }}
+        - name: supavisor_TENANT_ID
+          value: {{ .Values.supavisor.tenantId | quote }}
+        - name: supavisor_DEFAULT_POOL_SIZE
+          value: {{ .Values.supavisor.defaultPoolSize | quote }}
+        - name: supavisor_MAX_CLIENT_CONN
+          value: {{ .Values.supavisor.maxClientConn | quote }}
+        - name: supavisor_POOL_MODE
+          value: {{ .Values.supavisor.poolMode | quote }}
+        - name: DB_POOL_SIZE
+          value: {{ .Values.supavisor.dbPoolSize | quote }}
+        {{- if .Values.supavisor.resources }}
+        resources:
+          {{- toYaml .Values.supavisor.resources | nindent 10 }}
+        {{- end }}
+        command:
+        - "/bin/sh"
+        - "-c"
+        - "/app/bin/migrate && /app/bin/server"
+        {{- if .Values.supavisor.probes.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.supavisor.probes.path }}
+            port: {{ .Values.supavisor.containerPorts.api }}
+          initialDelaySeconds: {{ .Values.supavisor.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.supavisor.probes.liveness.periodSeconds }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.supavisor.probes.path }}
+            port: {{ .Values.supavisor.containerPorts.api }}
+          initialDelaySeconds: {{ .Values.supavisor.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.supavisor.probes.readiness.periodSeconds }}
+        {{- end }}
+{{- end }}

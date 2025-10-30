@@ -1,0 +1,20 @@
+{{- if .Values.realtime.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-realtime-init
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: realtime
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  99-realtime.sql: |
+    \set pguser `echo "$POSTGRES_USER"`
+
+    create schema if not exists _realtime;
+    alter schema _realtime owner to :pguser;
+{{- end }}

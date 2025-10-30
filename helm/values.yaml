@@ -1,0 +1,813 @@
+# Default values for supa-k8s Helm chart
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Common labels to apply to all resources
+commonLabels:
+  app.kubernetes.io/name: supabase
+  app.kubernetes.io/version: "0.1.0"
+  app.kubernetes.io/managed-by: Helm
+# Common annotations
+commonAnnotations: {}
+
+# Namespace configuration
+namespace:
+  name: supabase
+  create: true
+
+# =============================================
+# Secrets configuration
+secrets:
+  name: supabase-secrets
+  create: true
+  # Database credentials
+  postgres:
+    password: "your-super-secret-password"
+    user: "postgres"
+    host: "db"
+    port: 5432
+    database: "postgres"
+  # JWT configuration
+  jwt:
+    secret: "your-super-secret-jwt-token-with-at-least-32-characters-long"
+  # API Keys
+  keys:
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
+    serviceRoleKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
+  # Database URLs
+  databaseUrls:
+    postgres: "postgres://postgres:your-super-secret-password@db:5432/postgres"
+    storage: "postgres://supabase_admin:your-super-secret-password@db:5432/postgres"
+  # Dashboard credentials
+  dashboard:
+    username: "supabase"
+    password: "supabase"
+  # Realtime configuration
+  realtime:
+    secretKeyBase: "your-super-secret-key-base-with-at-least-64-characters-long-for-realtime"
+  # Vault encryption
+  vault:
+    encKey: "your-vault-encryption-key-with-at-least-32-characters-long"
+  # Logflare tokens
+  logflare:
+    publicAccessToken: "your-logflare-public-token"
+    privateAccessToken: "your-logflare-private-token"
+  # Domain configuration
+  domain: "localhost"
+
+# =============================================
+# Database configuration
+database:
+  name: db
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/postgres
+    tag: "17.6.1.016"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  # TBR
+  # Pre-init ConfigMap
+  # preInit:
+  #   enabled: false
+  # Persistence
+  persistence:
+    enabled: false
+    storageClass: ""
+    size: 10Gi
+  # Database settings
+  env:
+    host: "/var/run/postgresql"
+    port: "5432"
+    database: "postgres"
+  jwt:
+    exp: "3600"
+  # Probes configuration
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 5
+
+# =============================================
+# Analytics configuration
+analytics:
+  name: analytics
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/logflare
+    tag: "1.17.1"
+    migrationTag: "dev-70b49de"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "500m"
+  # Database settings
+  database:
+    username: "supabase_admin"
+    database: "postgres"
+    schema: "_analytics"
+  # Logflare settings
+  nodeHost: "127.0.0.1"
+  singleTenant: "true"
+  supabaseMode: "true"
+  minClusterSize: "1"
+  featureFlagOverride: "multibackend=true"
+  supabaseProjectRef: "default"
+  # Init containers
+  initContainers:
+    waitForDb:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "15-alpine"
+    createSchema:
+      enabled: true
+    runMigrations:
+      enabled: true
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 4000
+    targetPort: 4000
+  # Container port
+  containerPort: 4000
+  # Probes
+  probes:
+    enabled: false
+    port: 4000
+    path: /health
+    startup:
+      initialDelaySeconds: 20
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 20
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 10
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+
+# =============================================
+# Vector configuration
+vector:
+  name: vector
+  create: true
+  replicas: 1
+  image:
+    repository: timberio/vector
+    tag: "0.28.0-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # RBAC
+  rbac:
+    create: true
+    serviceAccountName: vector
+  # Security context
+  securityContext:
+    readOnlyRootFilesystem: false
+  # Container port
+  containerPort: 9001
+  # Volume mounts
+  volumes:
+    config:
+      enabled: true
+      configMapName: vector-config
+      mountPath: /etc/vector
+    data:
+      enabled: true
+      mountPath: /tmp/vector
+    varLog:
+      enabled: true
+      hostPath: /var/log
+      mountPath: /var/log
+    varLib:
+      enabled: true
+      hostPath: /var/lib
+      mountPath: /var/lib
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9001
+    targetPort: 9001
+  # Probes
+  probes:
+    enabled: false
+    port: 9001
+    path: /health
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# Meta (Postgres Meta API) configuration
+meta:
+  name: meta
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/postgres-meta
+    tag: "v0.91.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 8080
+  # Database connection settings
+  database:
+    host: "db"
+    port: "5432"
+    name: "postgres"
+    user: "supabase_admin"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+# =============================================
+# Studio configuration
+studio:
+  name: studio
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/studio
+    tag: "2025.08.11-sha-c538c4d"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  # Container port
+  containerPort: 3000
+  # Studio configuration
+  pgMetaUrl: "http://meta:8080"
+  defaultOrganization: "Default Organization"
+  defaultProject: "Default Project"
+  supabaseUrl: "http://kong:8000"
+  supabasePublicUrl: "http://localhost:8000"
+  logflareUrl: "http://analytics:4000"
+  storageUrl: "http://kong:8000/storage/v1"
+  # Feature flags
+  enableLogs: "true"
+  analyticsBackendProvider: "postgres"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+
+# =============================================
+# Kong API Gateway configuration
+kong:
+  name: kong
+  create: true
+  replicas: 1
+  image:
+    repository: kong
+    tag: "2.8.1"
+    pullPolicy: IfNotPresent
+  initContainer:
+    image:
+      repository: busybox
+      tag: "latest"
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  # Container ports
+  containerPorts:
+    http: 8000
+    https: 8443
+  # Kong configuration
+  config:
+    logLevel: "info"
+    database: "off"
+    declarativeConfig: "/home/kong/kong.yml"
+    dnsOrder: "LAST,A,CNAME"
+    plugins: "request-transformer,cors,key-auth,acl,basic-auth,http-log"
+    proxyBufferSize: "160k"
+    proxyBuffers: "64 160k"
+  # Service configuration
+  service:
+    type: NodePort
+    ports:
+      http:
+        port: 8000
+        targetPort: 8000
+        nodePort: 30800
+      https:
+        port: 8443
+        targetPort: 8443
+        nodePort: 30843
+
+# =============================================
+# Auth (GoTrue) configuration
+auth:
+  name: auth
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/gotrue
+    tag: "v2.180.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 9999
+  # Init containers
+  initContainers:
+    waitForDb:
+      enabled: true
+      image:
+        repository: busybox
+        tag: "1.28"
+    initSchema:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "15-alpine"
+  # GoTrue configuration
+  apiHost: "0.0.0.0"
+  apiPort: "9999"
+  apiExternalUrl: "http://localhost:8000"
+  siteUrl: "http://localhost:8000"
+  uriAllowList: ""
+  disableSignup: "false"
+  # Database configuration
+  database:
+    driver: "postgres"
+    url: "postgres://supabase_auth_admin:{{ .Values.secrets.postgres.password }}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+  # JWT configuration
+  jwt:
+    adminRoles: "service_role"
+    aud: "authenticated"
+    defaultGroupName: "authenticated"
+    exp: "3600"
+  # External providers
+  external:
+    emailEnabled: "true"
+    anonymousUsersEnabled: "true"
+    phoneEnabled: "false"
+  # Mailer configuration
+  mailer:
+    autoconfirm: "true"
+    adminEmail: "admin@example.com"
+    senderName: "Supabase"
+    urlPaths:
+      invite: "/auth/v1/verify"
+      confirmation: "/auth/v1/verify"
+      recovery: "/auth/v1/verify"
+      emailChange: "/auth/v1/verify"
+  # SMTP configuration
+  smtp:
+    host: "smtp.example.com"
+    port: "587"
+    user: ""
+    pass: ""
+  # SMS configuration
+  sms:
+    autoconfirm: "true"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9999
+    targetPort: 9999
+  # Probes
+  probes:
+    enabled: true
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# Realtime configuration
+realtime:
+  name: realtime
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/realtime
+    tag: "v2.53.2"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 4000
+  # Init containers
+  initContainers:
+    waitForDb:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "15-alpine"
+    # TBR
+    # initDb:
+    #   enabled: false
+    #   image:
+    #     repository: postgres
+    #     tag: "15-alpine"
+  # Database configuration
+  database:
+    host: "db"
+    port: "5432"
+    user: "supabase_admin"
+    name: "postgres"
+    afterConnectQuery: "SET search_path TO realtime"
+    encKey: "supabaserealtime"
+  # Realtime configuration
+  port: "4000"
+  erlAflags: "-proto_dist inet_tcp"
+  dnsNodes: "''"
+  rlimitNofile: "10000"
+  appName: "realtime"
+  seedSelfHost: "true"
+  runJanitor: "true"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 4000
+    targetPort: 4000
+  # TBR
+  # Job configuration for creating realtime user
+  # job:
+  #   enabled: false
+  #   ttlSecondsAfterFinished: 100
+
+# =============================================
+# REST (PostgREST) configuration
+rest:
+  name: rest
+  create: true
+  replicas: 1
+  image:
+    repository: postgrest/postgrest
+    tag: "v13.0.7"
+    pullPolicy: IfNotPresent
+  swaggerui:
+    image:
+      repository: swaggerapi/swagger-ui
+      tag: "v5.17.14"
+      pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+  # Container ports
+  containerPorts:
+    rest: 3000
+    swagger: 8080
+  # Init containers
+  initContainers:
+    waitForDb:
+      enabled: true
+      image:
+        repository: busybox
+        tag: "1.28"
+    initRestAuth:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "15-alpine"
+  # PostgREST configuration
+  logLevel: "info"
+  database:
+    uri: "postgres://authenticator:{{ .Values.secrets.postgres.password }}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+    schemas: "public,storage,graphql_public"
+    anonRole: "anon"
+    useLegacyGucs: "false"
+  openapi:
+    serverProxyUri: "http://localhost:8000/rest/v1/"
+    securityActive: "true"
+  # JWT configuration
+  jwt:
+    exp: "3600"
+  # Swagger UI configuration
+  swagger:
+    jsonUrl: "http://localhost:8000/rest/v1/"
+    baseUrl: "/swagger"
+  # Service configuration
+  service:
+    type: ClusterIP
+    ports:
+      rest:
+        port: 3000
+        targetPort: 3000
+      swagger:
+        port: 8080
+        targetPort: 8080
+  # Probes
+  probes:
+    enabled: false
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# Supavisor (Connection Pooler) configuration
+supavisor:
+  name: supavisor
+  create: true
+  replicas: 1
+  image:
+    repository: supabase/supavisor
+    tag: "2.5.7"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container ports
+  containerPorts:
+    api: 4000
+    postgres: 5432
+    transaction: 6543
+  # Init containers
+  initContainers:
+    waitForDb:
+      enabled: true
+      image:
+        repository: busybox
+        tag: "1.28"
+    runInitSql:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "15-alpine"
+  # Database configuration
+  database:
+    url: "postgres://supabase_admin:{{ .Values.secrets.postgres.password }}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+    port: "5432"
+    name: "postgres"
+  # Supavisor configuration
+  port: "4000"
+  clusterPostgres: "true"
+  region: "local"
+  erlAflags: "-proto_dist inet_tcp"
+  tenantId: "tenant"
+  defaultPoolSize: "15"
+  maxClientConn: "100"
+  poolMode: "transaction"
+  dbPoolSize: "5"
+  # Service configuration
+  service:
+    type: ClusterIP
+    ports:
+      api:
+        port: 4000
+        targetPort: 4000
+      postgres:
+        port: 5432
+        targetPort: 5432
+      transaction:
+        port: 6543
+        targetPort: 6543
+  # Probes
+  probes:
+    enabled: false
+    path: /api/health
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# Edge Functions Configuration
+functions:
+  create: true
+  name: functions
+  replicas: 1
+  image:
+    repository: supabase/edge-runtime
+    tag: v1.69.12
+    pullPolicy: IfNotPresent
+  # Resources
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 9000
+  port: 9000
+  # Environment variables
+  supabaseUrl: "http://kong:8000"
+  database:
+    url: "postgres://postgres:{{ .Values.secrets.postgres.password }}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+  verifyJwt: "false"
+  logLevel: "info"
+  # Function code
+  functionCode: |
+    // Setup type definitions for built-in Supabase Runtime APIs
+    import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+    interface reqPayload {
+      name: string;
+    }
+
+    console.info('server started');
+
+    Deno.serve(async (req: Request) => {
+      try {
+        const { name }: reqPayload = await req.json();
+        const data = {
+          message: `Hello ${name}!`,
+        };
+
+        return new Response(
+          JSON.stringify(data),
+          { headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' }}
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid JSON or missing body' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' }}
+        );
+      }
+    });
+  # Arguments
+  args:
+    - "start"
+    - "--log-source"
+    - "--main-service"
+    - "/home/deno/functions/main"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9000
+    targetPort: 9000
+  # Probes
+  probes:
+    enabled: false
+    path: /
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# Storage Configuration
+storage:
+  create: true
+  name: storage
+  replicas: 1
+  image:
+    repository: supabase/storage-api
+    tag: latest  # v1.25.7
+    pullPolicy: IfNotPresent
+  # Resources
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 5000
+  port: 5000
+  # Environment variables
+  postgrestUrl: "http://rest:3000"
+  database:
+    url: "postgres://supabase_admin:{{ .Values.secrets.postgres.password }}@{{ .Values.secrets.postgres.host }}:{{ .Values.secrets.postgres.port }}/{{ .Values.secrets.postgres.database }}"
+    installRoles: "false"
+  fileSizeLimit: "52428800"
+  storageBackend: "file"
+  fileStorageBackendPath: "/var/lib/storage"
+  tenantId: "stub"
+  region: "stub"
+  globalS3Bucket: "stub"
+  enableImageTransformation: "true"
+  imgproxyUrl: "http://imgproxy:5001"
+  # Storage volume
+  persistence:
+    enabled: true
+    storageClass: "local"
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    nodeName: "ubuntu-8gb-nbg1-1"  # Set to your node name
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 5000
+    targetPort: 5000
+  # Probes
+  probes:
+    enabled: true
+    path: /status
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# =============================================
+# ImgProxy Configuration
+imgproxy:
+  create: true
+  name: imgproxy
+  replicas: 1
+  image:
+    repository: darthsim/imgproxy
+    tag: v3.8.0
+    pullPolicy: IfNotPresent
+  # Resources
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  # Container port
+  containerPort: 5001
+  port: 5001
+  # Environment variables
+  bind: ":5001"
+  localFilesystemRoot: "/"
+  useEtag: "true"
+  enableWebpDetection: "true"
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 5001
+    targetPort: 5001
+  # Probes
+  probes:
+    enabled: true
+    command:
+      - imgproxy
+      - health
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5

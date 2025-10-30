@@ -1,0 +1,22 @@
+{{- if .Values.imgproxy.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.imgproxy.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.imgproxy.service.type }}
+  selector:
+    app: {{ .Values.imgproxy.name }}
+  ports:
+  - port: {{ .Values.imgproxy.service.port }}
+    targetPort: {{ .Values.imgproxy.service.targetPort }}
+    protocol: TCP
+{{- end }}

@@ -1,0 +1,31 @@
+{{- if .Values.supavisor.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.supavisor.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.supavisor.service.type }}
+  selector:
+    app: {{ .Values.supavisor.name }}
+  ports:
+  - name: api
+    port: {{ .Values.supavisor.service.ports.api.port }}
+    targetPort: {{ .Values.supavisor.service.ports.api.targetPort }}
+    protocol: TCP
+  - name: postgres
+    port: {{ .Values.supavisor.service.ports.postgres.port }}
+    targetPort: {{ .Values.supavisor.service.ports.postgres.targetPort }}
+    protocol: TCP
+  - name: transaction
+    port: {{ .Values.supavisor.service.ports.transaction.port }}
+    targetPort: {{ .Values.supavisor.service.ports.transaction.targetPort }}
+    protocol: TCP
+{{- end }}

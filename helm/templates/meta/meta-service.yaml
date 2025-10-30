@@ -1,0 +1,22 @@
+{{- if .Values.meta.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.meta.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: {{ .Values.meta.name }}
+  ports:
+  - port: {{ .Values.meta.service.port }}
+    targetPort: {{ .Values.meta.service.targetPort }}
+    name: http
+  type: {{ .Values.meta.service.type }}
+{{- end }}

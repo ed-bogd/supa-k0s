@@ -1,0 +1,53 @@
+{{- if .Values.meta.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.meta.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.meta.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.meta.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.meta.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+      - name: meta
+        image: "{{ .Values.meta.image.repository }}:{{ .Values.meta.image.tag }}"
+        imagePullPolicy: {{ .Values.meta.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.meta.containerPort }}
+          name: http
+        env:
+        - name: PG_META_PORT
+          value: {{ .Values.meta.containerPort | quote }}
+        - name: PG_META_DB_HOST
+          value: {{ .Values.meta.database.host | quote }}
+        - name: PG_META_DB_PORT
+          value: {{ .Values.meta.database.port | quote }}
+        - name: PG_META_DB_NAME
+          value: {{ .Values.meta.database.name | quote }}
+        - name: PG_META_DB_USER
+          value: {{ .Values.meta.database.user | quote }}
+        - name: PG_META_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secrets.name }}
+              key: POSTGRES_PASSWORD
+        {{- if .Values.meta.resources }}
+        resources:
+          {{- toYaml .Values.meta.resources | nindent 10 }}
+        {{- end }}
+{{- end }}

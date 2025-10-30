@@ -1,0 +1,20 @@
+{{- if .Values.supavisor.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-supavisor-init
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: database
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  99-supavisor.sql: |
+    \set pguser `echo "$POSTGRES_USER"`
+
+    create schema if not exists _supavisor;
+# alter schema _supavisor owner to :pguser;
+{{- end }}

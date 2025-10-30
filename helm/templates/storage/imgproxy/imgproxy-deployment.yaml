@@ -1,0 +1,77 @@
+{{- if .Values.imgproxy.create }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.imgproxy.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- toYaml .Values.commonLabels | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.imgproxy.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.imgproxy.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.imgproxy.name }}
+        {{- toYaml .Values.commonLabels | nindent 8 }}
+        app.kubernetes.io/component: storage
+    spec:
+      {{- if .Values.storage.persistence.enabled }}
+      volumes:
+      - name: storage-volume
+        persistentVolumeClaim:
+          claimName: supabase-storage-pvc
+      {{- end }}
+      containers:
+      - name: imgproxy
+        image: "{{ .Values.imgproxy.image.repository }}:{{ .Values.imgproxy.image.tag }}"
+        imagePullPolicy: {{ .Values.imgproxy.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.imgproxy.containerPort }}
+        env:
+        - name: IMGPROXY_BIND
+          value: {{ .Values.imgproxy.bind | quote }}
+        - name: IMGPROXY_LOCAL_FILESYSTEM_ROOT
+          value: {{ .Values.imgproxy.localFilesystemRoot | quote }}
+        - name: IMGPROXY_USE_ETAG
+          value: {{ .Values.imgproxy.useEtag | quote }}
+        - name: IMGPROXY_ENABLE_WEBP_DETECTION
+          valueFrom:
+            configMapKeyRef:
+              name: supabase-config
+              key: imgproxy-enable-webp-detection
+        {{- if .Values.storage.persistence.enabled }}
+        volumeMounts:
+        - name: storage-volume
+          mountPath: /var/lib/storage
+        {{- end }}
+        {{- if .Values.imgproxy.resources }}
+        resources:
+          {{- toYaml .Values.imgproxy.resources | nindent 10 }}
+        {{- end }}
+        {{- if .Values.imgproxy.probes.enabled }}
+        livenessProbe:
+          exec:
+            command:
+            {{- range .Values.imgproxy.probes.command }}
+            - {{ . | quote }}
+            {{- end }}
+          initialDelaySeconds: {{ .Values.imgproxy.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.imgproxy.probes.liveness.periodSeconds }}
+        readinessProbe:
+          exec:
+            command:
+            {{- range .Values.imgproxy.probes.command }}
+            - {{ . | quote }}
+            {{- end }}
+          initialDelaySeconds: {{ .Values.imgproxy.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.imgproxy.probes.readiness.periodSeconds }}
+        {{- end }}
+{{- end }}

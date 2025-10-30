@@ -74,8 +74,8 @@ database:
       cpu: "500m"
   # TBR
   # Pre-init ConfigMap
-  # preInit:
-  #   enabled: false
+  preInit:
+    enabled: false
   # Persistence
   persistence:
     enabled: false
@@ -284,6 +284,9 @@ studio:
   supabasePublicUrl: "http://localhost:8000"
   logflareUrl: "http://analytics:4000"
   storageUrl: "http://kong:8000/storage/v1"
+  # Add these missing environment variables
+  nextPublicApiUrl: "http://kong:8000"
+  nextPublicGotrueUrl: "http://kong:8000/auth/v1"
   # Feature flags
   enableLogs: "true"
   analyticsBackendProvider: "postgres"
@@ -454,11 +457,11 @@ realtime:
         repository: postgres
         tag: "15-alpine"
     # TBR
-    # initDb:
-    #   enabled: false
-    #   image:
-    #     repository: postgres
-    #     tag: "15-alpine"
+    initDb:
+      enabled: false
+      image:
+        repository: postgres
+        tag: "15-alpine"
   # Database configuration
   database:
     host: "db"
@@ -482,9 +485,9 @@ realtime:
     targetPort: 4000
   # TBR
   # Job configuration for creating realtime user
-  # job:
-  #   enabled: false
-  #   ttlSecondsAfterFinished: 100
+  job:
+    enabled: false
+    ttlSecondsAfterFinished: 100
 
 # =============================================
 # REST (PostgREST) configuration
